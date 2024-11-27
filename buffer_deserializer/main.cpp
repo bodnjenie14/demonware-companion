@@ -18,6 +18,8 @@ _____________________________DEMONWARE COMPANION______________________________**
 #include "utilities.h"
 #include "discovery.h"
 #include <conio.h>
+#include <filesystem>
+#include <fstream>
 
 struct MarketplaceInventoryItem
 {
@@ -54,7 +56,7 @@ void bdMarketplaceInventory(const char* file/*, MarketplaceInventoryItem* output
 
         std::vector<unsigned char> m_itemData; int length;
         reader->read_blob(&m_itemData, &length);
-        if(length)std::cout << "m_itemData: 0x" << std::hex << static_cast<int>(m_itemData.at(0)) << std::dec << std::endl;
+        if (length)std::cout << "m_itemData: 0x" << std::hex << static_cast<int>(m_itemData.at(0)) << std::dec << std::endl;
 
         reader->read_uint32(&output.m_expireDateTime);
         reader->read_int64(&output.m_expiryDuration);
@@ -97,32 +99,87 @@ void bdMarketingComms(const char* file)
     }
 }
 
-void ShowProgramOptions(char* file)
-{
-    std::cout << "Working sample: \"" << file << "\"" << std::endl << std::endl << "  Please choose desired function by inputing its specific number : " << std::endl << std::endl;
-    std::cout << "  1- perform data structure Discovery" << std::endl;
-    std::cout << "  2- deserialize bdMarketingComms buffer" << std::endl;
-    std::cout << "  3- deserialize bdMarketplaceInventory buffer" << std::endl;
+void ProcessBatchFolder(const std::string& folderPath) {
+    namespace fs = std::filesystem;
+
+    if (!fs::exists(folderPath)) {
+        fs::create_directory(folderPath);
+        std::cout << "Batch folder created at: " << folderPath << std::endl;
+    }
+
+    const std::string outputFolder = "./batch_output";
+    if (!fs::exists(outputFolder)) {
+        fs::create_directory(outputFolder);
+        std::cout << "Created output folder: " << outputFolder << std::endl;
+    }
+
+    std::cout << "Processing all payloads in folder: " << folderPath << std::endl;
+
+    size_t fileCount = 0;
+    for (const auto& entry : fs::directory_iterator(folderPath)) {
+        if (entry.is_regular_file()) {
+            ++fileCount;
+            std::string filePath = entry.path().string();
+            std::string outputFileName = outputFolder + "/" + entry.path().stem().string() + ".txt";
+
+            std::cout << "Found file: " << filePath << " -> Output: " << outputFileName << std::endl;
+
+            std::ofstream outputFile(outputFileName);
+            if (!outputFile.is_open()) {
+                std::cout << "Error: Unable to create output file: " << outputFileName << std::endl;
+                continue;
+            }
+
+            std::streambuf* originalCoutBuffer = std::cout.rdbuf();
+            std::cout.rdbuf(outputFile.rdbuf());
+
+            try {
+                ByteBuffer_StructureDiscovery(filePath.c_str());
+            }
+            catch (const std::exception& ex) {
+                std::cout << "Error processing file: " << ex.what() << std::endl;
+            }
+
+            std::cout.rdbuf(originalCoutBuffer);
+            outputFile.close();
+        }
+        else {
+            std::cout << "Skipping non-regular file: " << entry.path() << std::endl;
+        }
+    }
+
+    if (fileCount == 0) {
+        std::cout << "No files found in the folder: " << folderPath << std::endl;
+    }
+    else {
+        std::cout << "Batch processing complete. Processed " << fileCount << " files. Output saved in " << outputFolder << std::endl;
+    }
+
+    std::cout << "Processing complete. Press any key to close the program..." << std::endl;
+    _getch(); 
+}
+
+void ShowProgramOptions(char* file) {
+    std::cout << "  1- Perform data structure Discovery" << std::endl;
+    std::cout << "  2- Deserialize bdMarketingComms buffer" << std::endl;
+    std::cout << "  3- Process all payloads in /batch folder and save output in /batch_output" << std::endl;
 
     int input;
-    while (!(std::cin >> input) || (input < 1 || 4 < input)) {  //check the Input format for integer the right way
+    while (!(std::cin >> input) || (input < 1 || 4 < input)) {
         std::cin.clear();
         std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-        std::cout << "Invalid input.  Re-enter the number: ";
-    };
+        std::cout << "Invalid input. Re-enter the number: ";
+    }
 
-    std::cout << std::endl << "----------------------------------------------------------------------------------------------------------------" << std::endl;
-
-    switch (input)
-    {
+    switch (input) {
     case 1:
         ByteBuffer_StructureDiscovery(file);
         break;
-    case 3:
-        bdMarketplaceInventory(file);
-        break;
     case 2:
         bdMarketingComms(file);
+        break;
+    case 3:
+        ProcessBatchFolder("./batch"); 
         break;
     default:
         std::cout << "Invalid FunctionID!" << std::endl;
@@ -130,43 +187,33 @@ void ShowProgramOptions(char* file)
     }
 }
 
-#include <stdlib.h>
-int main(int argc, char* argv[])
-{
-    if (argc == 1) // Nothing inputed; Make Drag and Drop Console
-    {
-        std::cout << "Demonware Companion: ByteBuffer Tool (by Hosseinpourziyaie)" << std::endl << std::endl << "Help: Drag and Drop Demonware ByteBuffer Binary File on console to start!" << std::endl;
+int main(int argc, char* argv[]) {
+    namespace fs = std::filesystem;
 
-        std::string file_path;
+    if (!fs::exists("./batch")) {
+        fs::create_directory("./batch");
+        std::cout << "Batch folder created at: ./batch" << std::endl;
+    }
 
-        while (int ch = _getch())
-        {
-            if (ch == '\"') {
-                while ((ch = _getch()) != '\"')
-                    file_path += ch;
-            }
-            else {
-                file_path += ch;
+    std::cout << "Demonware Companion: ByteBuffer Tool (by Hosseinpourziyaie)" << std::endl
+        << "Drag and drop a file or use batch folder!" << std::endl;
 
-                while (_kbhit())
-                    file_path += _getch();
-            }
-
-            if (is_file_exists(file_path)) break;
-            else file_path.clear();
+    if (argc == 1) {
+        std::cout << "No file provided. Choose an option to proceed:" << std::endl;
+        ShowProgramOptions(nullptr); 
+    }
+    else if (argc == 2) {
+        if (is_file_exists(argv[1])) {
+            ShowProgramOptions(argv[1]); 
         }
-
-        std::cout << std::endl;
-
-        ShowProgramOptions(file_path.data());
+        else {
+            std::cout << "Error: File not found." << std::endl;
+        }
     }
-    else if (argc == 2)
-    {
-        if (is_file_exists(argv[1])) ShowProgramOptions(argv[1]);
-        else std::cout << "Demonware Companion: ByteBuffer Tool" << std::endl << std::endl << "|--- Invalid input file(404 Not Found) ---|" << std::endl;
+    else {
+        std::cout << "Please input one file at a time." << std::endl;
     }
-    else
-        std::cout << "Demonware Companion: ByteBuffer Tool" << std::endl << std::endl << "|--- Please Input Files one at a time ---|" << std::endl;
 
-    system("pause"); // press any key to Exit ...
+    return 0;
 }
+
