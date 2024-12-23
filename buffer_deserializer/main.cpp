@@ -20,6 +20,7 @@ _____________________________DEMONWARE COMPANION______________________________**
 #include <conio.h>
 #include <filesystem>
 #include <fstream>
+#include <regex>
 
 struct MarketplaceInventoryItem
 {
@@ -99,6 +100,8 @@ void bdMarketingComms(const char* file)
     }
 }
 
+#include <regex>
+
 void ProcessBatchFolder(const std::string& folderPath) {
     namespace fs = std::filesystem;
 
@@ -108,9 +111,17 @@ void ProcessBatchFolder(const std::string& folderPath) {
     }
 
     const std::string outputFolder = "./batch_output";
+    const std::string urlFile = outputFolder + "/extracted_urls.txt";
+
     if (!fs::exists(outputFolder)) {
         fs::create_directory(outputFolder);
         std::cout << "Created output folder: " << outputFolder << std::endl;
+    }
+
+    std::ofstream urlOutput(urlFile);
+    if (!urlOutput.is_open()) {
+        std::cout << "Error: Unable to create URL file: " << urlFile << std::endl;
+        return;
     }
 
     std::cout << "Processing all payloads in folder: " << folderPath << std::endl;
@@ -135,6 +146,7 @@ void ProcessBatchFolder(const std::string& folderPath) {
 
             try {
                 ByteBuffer_StructureDiscovery(filePath.c_str());
+                outputFile.flush(); // Ensure all output is written before scanning
             }
             catch (const std::exception& ex) {
                 std::cout << "Error processing file: " << ex.what() << std::endl;
@@ -142,6 +154,21 @@ void ProcessBatchFolder(const std::string& folderPath) {
 
             std::cout.rdbuf(originalCoutBuffer);
             outputFile.close();
+
+            // Scan output file for URLs
+            std::ifstream scannedFile(outputFileName);
+            if (scannedFile.is_open()) {
+                std::string line;
+                std::regex urlRegex(R"((https?://[^\s]+|www\.[^\s]+|[a-zA-Z]+://[^\s]+))");
+
+                while (std::getline(scannedFile, line)) {
+                    std::smatch match;
+                    while (std::regex_search(line, match, urlRegex)) {
+                        urlOutput << match.str(0) << std::endl;
+                        line = match.suffix();
+                    }
+                }
+            }
         }
         else {
             std::cout << "Skipping non-regular file: " << entry.path() << std::endl;
@@ -155,9 +182,12 @@ void ProcessBatchFolder(const std::string& folderPath) {
         std::cout << "Batch processing complete. Processed " << fileCount << " files. Output saved in " << outputFolder << std::endl;
     }
 
+    urlOutput.close();
+    std::cout << "Extracted URLs saved in: " << urlFile << std::endl;
     std::cout << "Processing complete. Press any key to close the program..." << std::endl;
-    _getch(); 
+    _getch();
 }
+
 
 void ShowProgramOptions(char* file) {
     std::cout << "  1- Perform data structure Discovery" << std::endl;
