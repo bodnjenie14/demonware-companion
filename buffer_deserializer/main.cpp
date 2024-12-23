@@ -100,7 +100,6 @@ void bdMarketingComms(const char* file)
     }
 }
 
-#include <regex>
 
 void ProcessBatchFolder(const std::string& folderPath) {
     namespace fs = std::filesystem;
@@ -146,7 +145,7 @@ void ProcessBatchFolder(const std::string& folderPath) {
 
             try {
                 ByteBuffer_StructureDiscovery(filePath.c_str());
-                outputFile.flush(); // Ensure all output is written before scanning
+                outputFile.flush(); 
             }
             catch (const std::exception& ex) {
                 std::cout << "Error processing file: " << ex.what() << std::endl;
@@ -164,7 +163,7 @@ void ProcessBatchFolder(const std::string& folderPath) {
                 while (std::getline(scannedFile, line)) {
                     std::smatch match;
                     while (std::regex_search(line, match, urlRegex)) {
-                        urlOutput << match.str(0) << std::endl;
+                        urlOutput << entry.path().filename().string() << ": " << match.str(0) << std::endl; //log the file url found in
                         line = match.suffix();
                     }
                 }
@@ -187,6 +186,7 @@ void ProcessBatchFolder(const std::string& folderPath) {
     std::cout << "Processing complete. Press any key to close the program..." << std::endl;
     _getch();
 }
+
 
 
 void ShowProgramOptions(char* file) {
