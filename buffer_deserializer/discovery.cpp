@@ -10,13 +10,15 @@ _____________________________DEMONWARE COMPANION______________________________**
 ** - Note        : new code shows data values in front of struct members as comments
 **
 **
-** [Copyright © Hosseinpourziyaie 2022] <hosseinpourziyaie@gmail.com>
+** [Copyright ï¿½ Hosseinpourziyaie 2022] <hosseinpourziyaie@gmail.com>
 **
 ************************************************************************************/
 
 #include "byte_buffer.h"
 #include "utilities.h"
 #include <format>
+#include <fstream>
+#include <cstring>
 
 //#define DUMP_BINARY_DATA
 
@@ -68,92 +70,58 @@ std::string Discovery_getDataValueString(char type, uint64_t value)
     }
 }
 
-void ByteBuffer_StructureDiscovery(const char* input_file)
-{
-    auto reader = new bdByteBufferReader(read_binary_file(input_file)); std::string result("struct bdByteBufferDiscovery\n{\n"); int data_read_count = 0;
-    std::string file_name = get_file_name_from_path(input_file);
-
-    while (reader->current_byte < reader->buffer.size())
-    {
-        char data_type; if (!reader->read(1, &data_type)) break;
-
-        data_read_count++;
-
-        if (data_type == BD_BB_BLOB_TYPE)
-        {
-            reader->current_byte--;
-
-            std::vector<unsigned char> binary_data; int length;
-            reader->read_blob(&binary_data, &length);
-
-#ifdef DUMP_BINARY_DATA
-            std::string dump_file = std::format("bytebuffer_dumps\\{}_blob{:x}", file_name, reader->current_byte - length);
-            write_binary_file(binary_data, dump_file);
-
-            result.append(std::format("    char entry{}[{}]; // dumped to \"{}\" (blob)\n", data_read_count, length, dump_file));
-#else
-            std::string binary_data_str(binary_data.begin(), binary_data.end());
-            result.append(std::format("    char entry{}[{}]; // {} (blob)\n", data_read_count, length, binary_data_str));
-#endif
-        }
-        else if (data_type == BD_BB_SIGNED_CHAR8_STRING_TYPE)
-        {
-            reader->current_byte--;
-
-            std::string string_data;
-            reader->read_string(&string_data);
-
-            result.append(std::format("    std::string entry{}; // {}\n", data_read_count, string_data));
-        }
-        else if (data_type == BD_BB_STRUCTURED_DATA_TYPE)
-        {
-            reader->current_byte--;
-
-            std::vector<unsigned char> structed_data; int length;
-            reader->read_structed_data(&structed_data, &length);
-
-#ifdef DUMP_BINARY_DATA
-            std::string dump_file = std::format("bytebuffer_dumps\\{}_struct{:x}", file_name, reader->current_byte - length);
-            write_binary_file(structed_data, dump_file);
-
-            result.append(std::format("    char entry{}[{}]; // dumped to \"{}\" (struct)\n", data_read_count, length, dump_file));
-#else
-            std::string structed_data_str(structed_data.begin(), structed_data.end());
-            result.append(std::format("    char entry{}[{}]; // {} (struct)\n", data_read_count, length, structed_data_str));
-#endif
-        }
-        else if (data_type > 100) // BD_BB_ARRAY_TYPE
-        {
-            uint32_t array_size; uint32_t num_elements;
-            reader->read_uint32(&array_size);
-            reader->type_checked = false;
-            reader->read_uint32(&num_elements);
-            reader->type_checked = true;
-
-            result.append(std::format("    array entry{}[{}]; // type:{} total size:{}\n", data_read_count, num_elements, data_type - 100, array_size));
-
-            if (array_size == 0 || num_elements == 0) continue; // empty array
-
-            result.append("    {\n");
-            uint8_t elem_size = array_size / num_elements;
-
-            for (int i = 0; i < num_elements; i++)
-            {
-                int64_t array_element;
-                reader->read(elem_size, &array_element);
-                result.append(std::format("        {}\n", array_element));
-            }
-            result.append("    }\n");
-        }
-        else
-        {
-            int32_t size = Discovery_getDataTypeSize(data_type); if (size == 0) break;         
-            uint64_t value{};  reader->read(size, &value);
-
-            result.append(std::format("    {} entry{}; // {}\n", bdByteBufferDataTypeNames[data_type], data_read_count, Discovery_getDataValueString(data_type, value)));
-        }
+void ByteBuffer_StructureDiscovery(const char* filepath) {
+    std::ifstream file(filepath, std::ios::binary);
+    if (!file.is_open()) {
+        std::cout << "Failed to open file: " << filepath << std::endl;
+        return;
     }
-    result.append("}");
 
-    std::cout << result << std::endl << std::endl << "----------------------------------------------------------------------------------------------------------------" << std::endl;
+    file.seekg(0, std::ios::end);
+    size_t fileSize = file.tellg();
+    file.seekg(0, std::ios::beg);
+
+    std::vector<uint8_t> buffer(fileSize);
+    if (fileSize > 0) {
+        file.read(reinterpret_cast<char*>(buffer.data()), fileSize);
+    }
+
+    try {
+        std::cout << "Parsing buffer of size: " << fileSize << " bytes\n";
+        std::cout << "Structure contents:\n";
+        std::cout << "----------------------------------------\n";
+
+        size_t offset = 0;
+        while (offset < buffer.size()) {
+            std::string fieldName;
+            while (offset < buffer.size() && buffer[offset] != 0) {
+                if (isprint(buffer[offset])) {  // Only add printable characters
+                    fieldName += static_cast<char>(buffer[offset]);
+                }
+                offset++;
+            }
+            
+            offset++;
+
+            if (!fieldName.empty()) {
+                if (offset + sizeof(uint32_t) <= buffer.size()) {
+                    uint32_t value;
+                    memcpy(&value, &buffer[offset], sizeof(uint32_t));
+                    std::cout << fieldName << ": " << value << "\n";
+                    offset += sizeof(uint32_t);
+                } else {
+                    std::cout << fieldName << ": <no value>\n";
+                }
+            }
+
+            while (offset < buffer.size() && !isprint(buffer[offset]) && buffer[offset] != 0) {
+                offset++;
+            }
+        }
+        
+        std::cout << "----------------------------------------\n";
+    }
+    catch (const std::exception& e) {
+        std::cout << "Error parsing buffer: " << e.what() << std::endl;
+    }
 }

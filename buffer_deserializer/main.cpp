@@ -10,7 +10,7 @@ _____________________________DEMONWARE COMPANION______________________________**
 ** - Note        : This console application has a creative drag n drop feature
 **
 **
-** [Copyright © Hosseinpourziyaie 2022] <hosseinpourziyaie@gmail.com>
+** [Copyright ï¿½ Hosseinpourziyaie 2022] <hosseinpourziyaie@gmail.com>
 **
 ************************************************************************************/
 
@@ -100,9 +100,12 @@ void bdMarketingComms(const char* file)
     }
 }
 
+bool ScanFileForUrls(const std::string& filename, std::ofstream& urlOutput, const std::string& sourceFile);
 
 void ProcessBatchFolder(const std::string& folderPath) {
     namespace fs = std::filesystem;
+
+    const size_t MAX_FILE_SIZE = 100 * 1024 * 1024; 
 
     if (!fs::exists(folderPath)) {
         fs::create_directory(folderPath);
@@ -128,45 +131,44 @@ void ProcessBatchFolder(const std::string& folderPath) {
     size_t fileCount = 0;
     for (const auto& entry : fs::directory_iterator(folderPath)) {
         if (entry.is_regular_file()) {
+            std::uintmax_t fileSize = fs::file_size(entry.path());
+            if (fileSize > MAX_FILE_SIZE) {
+                std::cout << "Skipping file larger than 100MB: " << entry.path() << std::endl;
+                continue;
+            }
+
             ++fileCount;
             std::string filePath = entry.path().string();
             std::string outputFileName = outputFolder + "/" + entry.path().stem().string() + ".txt";
 
-            std::cout << "Found file: " << filePath << " -> Output: " << outputFileName << std::endl;
+            std::cout << "Processing file (" << fileSize / 1024 << "KB): " << filePath << std::endl;
 
-            std::ofstream outputFile(outputFileName);
-            if (!outputFile.is_open()) {
-                std::cout << "Error: Unable to create output file: " << outputFileName << std::endl;
-                continue;
-            }
-
-            std::streambuf* originalCoutBuffer = std::cout.rdbuf();
-            std::cout.rdbuf(outputFile.rdbuf());
+            std::streambuf* originalCoutBuffer = nullptr;
 
             try {
+                std::ofstream outputFile(outputFileName);
+                if (!outputFile.is_open()) {
+                    throw std::runtime_error("Unable to create output file: " + outputFileName);
+                }
+
+                originalCoutBuffer = std::cout.rdbuf();
+                std::cout.rdbuf(outputFile.rdbuf());
+
                 ByteBuffer_StructureDiscovery(filePath.c_str());
-                outputFile.flush(); 
+                outputFile.flush();
+                std::cout.rdbuf(originalCoutBuffer);
+                outputFile.close();
+
+                if (!ScanFileForUrls(outputFileName, urlOutput, entry.path().filename().string())) {
+                    std::cout << "Warning: Error scanning file for URLs: " << outputFileName << std::endl;
+                }
             }
             catch (const std::exception& ex) {
-                std::cout << "Error processing file: " << ex.what() << std::endl;
-            }
-
-            std::cout.rdbuf(originalCoutBuffer);
-            outputFile.close();
-
-            // Scan output file for URLs
-            std::ifstream scannedFile(outputFileName);
-            if (scannedFile.is_open()) {
-                std::string line;
-                std::regex urlRegex(R"((https?://[^\s]+|www\.[^\s]+|[a-zA-Z]+://[^\s]+))");
-
-                while (std::getline(scannedFile, line)) {
-                    std::smatch match;
-                    while (std::regex_search(line, match, urlRegex)) {
-                        urlOutput << entry.path().filename().string() << ": " << match.str(0) << std::endl; //log the file url found in
-                        line = match.suffix();
-                    }
+                if (originalCoutBuffer) {  
+                    std::cout.rdbuf(originalCoutBuffer);
                 }
+                std::cout << "Error processing file " << filePath << ": " << ex.what() << std::endl;
+                continue;
             }
         }
         else {
@@ -187,7 +189,29 @@ void ProcessBatchFolder(const std::string& folderPath) {
     _getch();
 }
 
+bool ScanFileForUrls(const std::string& filename, std::ofstream& urlOutput, const std::string& sourceFile) {
+    try {
+        std::ifstream scannedFile(filename);
+        if (!scannedFile.is_open()) {
+            return false;
+        }
 
+        std::string line;
+        std::regex urlRegex(R"((https?://[^\s]+|www\.[^\s]+|[a-zA-Z]+://[^\s]+))");
+
+        while (std::getline(scannedFile, line)) {
+            std::smatch match;
+            while (std::regex_search(line, match, urlRegex)) {
+                urlOutput << sourceFile << ": " << match.str(0) << std::endl;
+                line = match.suffix();
+            }
+        }
+        return true;
+    }
+    catch (const std::exception&) {
+        return false;
+    }
+}
 
 void ShowProgramOptions(char* file) {
     std::cout << "  1- Perform data structure Discovery" << std::endl;
@@ -216,6 +240,7 @@ void ShowProgramOptions(char* file) {
         break;
     }
 }
+
 
 int main(int argc, char* argv[]) {
     namespace fs = std::filesystem;
